@@ -6,6 +6,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from random import random
+		
 
 def gen_data(x, err, param):
     N           =   len(x)
@@ -71,6 +72,7 @@ if __name__ == "__main__":
     errVec      =   (np.random.rand(nSample) - 0.5) * 2.0   # fluctuation
 
     xMat, yVec  =   gen_data(xVec, errVec, paramVec)        # generate xMat and yVec
+
 
     # fitting area
     m           =   len(paramVec) - 1                       # mth order
