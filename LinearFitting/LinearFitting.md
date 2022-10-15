@@ -132,14 +132,14 @@ I can express this as
 $$
 \begin{aligned}
 	&\Theta\vec{a}=\vec{\phi} \\
-	&\Theta = Mat(m+1;R), \quad\vec{a}, \vec{\phi} \in R^{m+1}
+	&\Theta = \mathbf{Mat}(m+1;R), \quad\vec{a}, \vec{\phi} \in R^{m+1}
 \end{aligned}
 $$
 Suprisingly $\Theta$ is symmetric matrix. Is there something special? I don't know. Maybe not. Anyway, we have a data about $\Theta$ and $\vec{\phi}$ . What we want to know is $\vec{a}$. To solve this problem, we apply **GaussElimination**.
 
 ## Algorithm
 **1. Bring data**
-In my code, it reads 3 columns data $\left\{x_i, y_i, \sigma_i\right\}$ and put it in **LinearSquareFit**
+In my code, it reads 3 columns data $\{x_i, y_i, \sigma_i\}$ and put it in **LinearSquareFit**
 
 **2. Fitting**
 I want more efficient and vectorized code but I'm used to write C code, so it is so hard to me. Anyway, the target is caculate $\Theta$ and $\vec{\phi}$ with dataset. The way how to caculate them is written above thoery part.
