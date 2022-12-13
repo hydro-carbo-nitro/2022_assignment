@@ -50,14 +50,14 @@ class Concatenation:
 		self.WI = WItem
 
 	def forward(self, x):
-		self.idxUser, self.idxItem = np.int32(x[:, 0]), np.int32(x[:, 1])
+		self.Set = np.int32(x)
+		self.idxUser, self.idxItem = self.Set[:, 0], self.Set[:, 1]
+
 		user = self.WU[self.idxUser]
 		item = self.WI[self.idxItem]
 
-		print(user)
-
 		out = np.concatenate((user, item), axis=1)
-	
+
 		return out
 
 	def backward(self, dout):
@@ -68,11 +68,11 @@ class Concatenation:
 
 		dWU_tmp = dout[:, :nLatent]
 		dWI_tmp = dout[:, nLatent:]
-		
+
 		# I hope to avoid for loop...
-		for u, i in zip(self.idxUser, self.idxItem):
-			self.dWU += dWU_tmp
-			self.dWI += dWI_tmp
+		for sample, (u, i) in enumerate(self.Set):
+			self.dWU[u] += dWU_tmp[sample]
+			self.dWI[i] += dWI_tmp[sample]
 	
 class IdentityWithLoss:
 	def __init__(self):
@@ -81,11 +81,9 @@ class IdentityWithLoss:
 		self.t = None	# Scalar
 
 	def forward(self, x, t):
-		self.t = t
+		self.t = t.reshape(t.shape[0], -1)
 		self.y = x	# Identity function
-		print(t.shape)
-		print(x.shape)
-		self.loss = (self.y - self.t) ** 2
+		self.loss = np.sum((self.y - self.t) ** 2)
 
 		return self.loss
 
@@ -102,15 +100,9 @@ class LayerNet:
 		#	nItem		:	Number of items which of rating is nonzero
 		#	nLatent		:	Number of latents
 		#
-		#	inSize		:	InputLayer size. It is always 2. User index and item index
-		#	concSize	:	ConcatenationLayer size. It is 2K. K is the number of latent factor.
 		#	hidSize		:	HiddenLayer size. For the simple implementation, there is only one hidden layer
-		#	outSize		:	OutputLayer size. It is always 1. Because there is only one answer for (user, item) pair
 		#	##########################################################################################################
 
-		inSize = 2
-		concSize = 2 * nLatent
-		outSize = 1
 		
 		nUser, nItem = np.unique(nSet[:, 0]).shape[0], np.unique(nSet[:, 1]).shape[0]
 
@@ -124,15 +116,15 @@ class LayerNet:
 		self.params = {}
 		self.params['WU'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
 		self.params['WI'] = np.random.normal(loc=0, scale=0.01,  size=(nItem, nLatent))
-		self.params['W2'] = np.random.normal(loc=0, scale=0.01,  size=(concSize, hidSize))
+		self.params['W2'] = np.random.normal(loc=0, scale=0.01,  size=(2*nLatent, hidSize))
 		self.params['b2'] = np.zeros(hidSize)
-		self.params['W3'] = np.random.normal(loc=0, scale=0.01,  size=(hidSize, outSize))
+		self.params['W3'] = np.random.normal(loc=0, scale=0.01,  size=(hidSize, 1))
 
 		self.layers = {}
 		self.layers['Concatenation'] = Concatenation(self.params['WU'], self.params['WI'])			# Not Yet
 		self.layers['Affine2'] = Affine(self.params['W2'], self.params['b2'])
 		self.layers['Relu2'] = Relu()
-		self.layers['WeightDot'] = Affine(self.params['W3'], np.zeros(outSize))
+		self.layers['WeightDot'] = Affine(self.params['W3'], np.zeros(1))
 		
 		self.lastLayer = IdentityWithLoss()
 
@@ -172,8 +164,8 @@ if __name__ == "__main__":
 	raw_data = np.loadtxt("sample_realvalue.dat")
 	
 	M, N = raw_data.shape
-	K = 2
-	nIter = 100
+	K = 5
+	nIter = 2
 	lr = 0.001
 	
 	samples = np.array([(u, i, raw_data[u, i]) for u in range(M) for i in range(N) if raw_data[u, i] > 0])
@@ -181,11 +173,7 @@ if __name__ == "__main__":
 	x = samples[:, 0:2]
 	t = samples[:, 2]
 
-
 	network = LayerNet(x, K, 3)
-
-	for key in network.params.keys():
-		print(network.params[key].shape)
 
 	for i in range(nIter):
 		grad = network.gradient(x, t)
@@ -194,6 +182,6 @@ if __name__ == "__main__":
 			network.params[key] -= lr * grad[key]
 
 		loss = network.loss(x, t)
-		print(f"{nIter} : {loss}")
+		print(f"{i} : {loss}")
 	
 
