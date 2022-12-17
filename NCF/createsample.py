@@ -16,4 +16,4 @@ data = np.array([
     [0, 1, 0, 1, 0],
 ])
 """
-np.savetxt("sample_realvalue2.dat", data)
+np.savetxt("sample.dat", data)

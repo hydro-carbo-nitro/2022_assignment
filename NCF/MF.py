@@ -127,7 +127,7 @@ def MF_BinaryValue(Y, K, n_iter=10000, iter_per_epoch=100, lr=.001):
 	return P, Q
 
 if __name__=="__main__":
-	data_RealValue = np.loadtxt("sample_realvalue.dat")
+	data_RealValue = np.loadtxt("sample.dat")
 	data_BinaryValue = np.zeros_like(data_RealValue)
 	data_BinaryValue[data_RealValue != 0] = 1
 

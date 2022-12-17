@@ -7,6 +7,9 @@ np.set_printoptions(precision=1, suppress=True)
 def MSE(y, t):
 	return (y - t)**2
 
+def sigmoid(x):
+	return 1.0 / (1.0 + np.exp(-x))
+
 class Relu:
 	def __init__(self):
 		self.mask = None
@@ -76,7 +79,7 @@ class Concatenation:
 			self.dWU[u] += dWU_tmp[sample]
 			self.dWI[i] += dWI_tmp[sample]
 	
-class IdentityWithLoss:
+class SigmoidWithLoss:
 	def __init__(self):
 		self.loss = None
 		self.y = None	# Scalar
@@ -84,13 +87,13 @@ class IdentityWithLoss:
 
 	def forward(self, x, t):
 		self.t = t.reshape(t.shape[0], -1)
-		self.y = x	# Identity function
-		self.loss = np.sum((self.y - self.t) ** 2) / t.shape[0]
+		self.y = sigmoid(x)
+		self.loss = -np.sum(self.y * np.log(self.y) + (1.0 - self.y) * np.log(1.0 - self.y)) / t.shape[0]
 
 		return self.loss
 
 	def backward(self, dout=1.0):
-		dx = 2.0 * (self.y - self.t)
+		dx = self.y - self.t
 
 		return dx
 
@@ -143,8 +146,8 @@ class LayerNet:
 		self.layers['Affine2'] = Affine(self.params['W2'], self.params['b2'])
 		self.layers['Relu2'] = Relu()
 		self.layers['WeightDot'] = WeightDot(self.params['W3'])
-		
-		self.lastLayer = IdentityWithLoss()
+
+		self.lastLayer = SigmoidWithLoss()
 
 	def predict(self, x):
 		for layer in self.layers.values():
@@ -179,7 +182,7 @@ class LayerNet:
 		return grads
 
 	def accuracy(self, x, t):
-		y = self.predict(x)
+		y = sigmoid(self.predict(x))
 		
 		acc = np.sum(np.fabs(y - t) <= 0.01) / t.shape[0]
 		return acc
@@ -188,6 +191,7 @@ def get_samples(raw_data, ratio=4):
 	M, N = raw_data.shape
 
 	data = raw_data.copy()
+	data[data != 0] = 1 # to be implicit
 
 	# for all instances
 	allSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N)])
@@ -196,7 +200,7 @@ def get_samples(raw_data, ratio=4):
 	all_t = allSet[:, 2]
 
 	# for testSet
-	testSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] > 0])
+	testSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] != 0])
 	
 	test_x = testSet[:, :2]
 	test_t = testSet[:, 2]
@@ -209,7 +213,7 @@ def get_samples(raw_data, ratio=4):
 			data[u, blind] = 0
 		
 	# for positive instances
-	posSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] > 0])
+	posSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] != 0])
 	
 	# for negative instances
 	for u in range(M):
@@ -254,7 +258,7 @@ if __name__ == "__main__":
 			print(f"{i+1} : loss={train_loss:4e}\t traing_acc={train_acc:4e}\t test_acc={test_acc:4e}")
 
 
-	all_y = network.predict(all_x)
+	all_y = sigmoid(network.predict(all_x))
 
 	all_y = all_y.reshape(raw_data.shape[0], raw_data.shape[1])
 	all_t = all_t.reshape(raw_data.shape[0], raw_data.shape[1])
