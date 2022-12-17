@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import numpy as np
+import sys
 
 def MSE(y, t):
 	return (y - t)**2
@@ -83,11 +84,11 @@ class IdentityWithLoss:
 	def forward(self, x, t):
 		self.t = t.reshape(t.shape[0], -1)
 		self.y = x	# Identity function
-		self.loss = np.sum((self.y - self.t) ** 2)
+		self.loss = np.sum((self.y - self.t) ** 2) / t.shape[0]
 
 		return self.loss
 
-	def backward(self, dout=1):
+	def backward(self, dout=1.0):
 		dx = 2.0 * (self.y - self.t)
 
 		return dx
@@ -130,12 +131,17 @@ class LayerNet:
 
 	def predict(self, x):
 		for layer in self.layers.values():
+#			print(layer)
 			x = layer.forward(x)
+#			print(x.shape)
+#			print(x)
 
 		return x
 
 	def loss(self, x, t):
 		y = self.predict(x)
+#		print(y)
+#		print(t)
 		return self.lastLayer.forward(y, t)
 
 	def gradient(self, x, t):
@@ -161,11 +167,11 @@ class LayerNet:
 		return grads
 
 if __name__ == "__main__":
-	raw_data = np.loadtxt("sample_realvalue.dat")
+	raw_data = np.loadtxt("sample_realvalue2.dat")
 	
 	M, N = raw_data.shape
 	K = 5
-	nIter = 2
+	nIter = 10000
 	lr = 0.001
 	
 	samples = np.array([(u, i, raw_data[u, i]) for u in range(M) for i in range(N) if raw_data[u, i] > 0])
@@ -173,7 +179,7 @@ if __name__ == "__main__":
 	x = samples[:, 0:2]
 	t = samples[:, 2]
 
-	network = LayerNet(x, K, 3)
+	network = LayerNet(x, K, 50)
 
 	for i in range(nIter):
 		grad = network.gradient(x, t)
@@ -183,5 +189,11 @@ if __name__ == "__main__":
 
 		loss = network.loss(x, t)
 		print(f"{i} : {loss}")
+
+	y = network.predict(x)
+
+	print(M, N)
+	print(y)
+	print(t)
 	
 
