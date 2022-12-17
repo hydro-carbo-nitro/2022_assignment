@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 import numpy as np
-import sys
 
 def MSE(y, t):
 	return (y - t)**2
@@ -100,10 +99,8 @@ class LayerNet:
 		#	nUser		:	Number of users who have any nonzeros rating
 		#	nItem		:	Number of items which of rating is nonzero
 		#	nLatent		:	Number of latents
-		#
 		#	hidSize		:	HiddenLayer size. For the simple implementation, there is only one hidden layer
 		#	##########################################################################################################
-
 		
 		nUser, nItem = np.unique(nSet[:, 0]).shape[0], np.unique(nSet[:, 1]).shape[0]
 
@@ -129,19 +126,14 @@ class LayerNet:
 		
 		self.lastLayer = IdentityWithLoss()
 
-	def predict(self, x):
+	def forwarding(self, x):
 		for layer in self.layers.values():
-#			print(layer)
 			x = layer.forward(x)
-#			print(x.shape)
-#			print(x)
 
 		return x
 
 	def loss(self, x, t):
-		y = self.predict(x)
-#		print(y)
-#		print(t)
+		y = self.forwarding(x)
 		return self.lastLayer.forward(y, t)
 
 	def gradient(self, x, t):
@@ -166,18 +158,36 @@ class LayerNet:
 
 		return grads
 
-if __name__ == "__main__":
-	raw_data = np.loadtxt("sample_realvalue2.dat")
-	
+	def predict(self, x):
+		pass
+
+def get_samples(raw_data, ratio=4):
 	M, N = raw_data.shape
-	K = 5
-	nIter = 10000
-	lr = 0.001
+
+	# for positive instances
+	samples = [(u, i, raw_data[u, i]) for u in range(M) for i in range(N) if raw_data[u, i] > 0]
 	
-	samples = np.array([(u, i, raw_data[u, i]) for u in range(M) for i in range(N) if raw_data[u, i] > 0])
+	# for negative instances
+	for u in range(M):
+		negs = [i for i in range(N) if raw_data[u, i] == 0]
+		neg_idx = np.random.choice(negs, ratio, replace=False)
+		neg_sample = [(u, i, raw_data[u, i]) for i in neg_idx]
+
+		samples = np.concatenate((samples, neg_sample), axis=0)
 
 	x = samples[:, 0:2]
 	t = samples[:, 2]
+
+	return x, t
+
+if __name__ == "__main__":
+	raw_data = np.loadtxt("sample_realvalue2.dat")
+
+	x, t = get_samples(raw_data, 1)
+	
+	K = 5
+	nIter = 10000
+	lr = 0.001
 
 	network = LayerNet(x, K, 50)
 
@@ -187,13 +197,15 @@ if __name__ == "__main__":
 		for key in ('WU', 'WI', 'W2', 'b2', 'W3'):
 			network.params[key] -= lr * grad[key]
 
-		loss = network.loss(x, t)
-		print(f"{i} : {loss}")
+		if (i+1)%100 == 0:
+			loss = network.loss(x, t)
+			print(f"{i+1} : {loss}")
 
-	y = network.predict(x)
 
-	print(M, N)
-	print(y)
+	y = network.forwarding(x)
+
+	print(np.int32(y))
 	print(t)
-	
+
+
 
