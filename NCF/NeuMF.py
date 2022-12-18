@@ -4,6 +4,65 @@ import numpy as np
 
 np.set_printoptions(precision=1, suppress=True)
 
+class ElementWiseProduct:
+	def __init__(self, P, Q):
+		self.P = P
+		self.Q = Q
+
+	def forward(self, x):
+		self.Set = np.int32(x)
+		self.idxUser, self.idxItem = self.Set[:, 0], self.Set[:, 1]
+
+		user = self.P[self.idxUser]
+		item = self.Q[self.idxItem]
+
+		out = user * item
+
+		return out
+
+	def backward(self, dout):
+		self.dP = np.zeros_like(self.P)
+		self.dQ = np.zeros_like(self.Q)
+
+		for sample, (u, i) in enumerate(self.Set):
+			self.dP[u] += dout[sample] * self.Q[i]
+			self.dQ[i] += dout[sample] * self.P[u]
+		
+class IdentityWithLoss:
+	def __init__(self):
+		self.loss = None
+		self.y = None	# Scalar
+		self.t = None	# Scalar
+
+	def forward(self, x, t):
+		self.t = t.reshape(t.shape[0], -1)
+		self.y = x	# Identity function
+		self.loss = np.sum((self.y - self.t) ** 2) / t.shape[0]
+
+		return self.loss
+
+	def backward(self, dout=1.0):
+		dx = 2.0 * (self.y - self.t)
+
+		return dx
+
+class WeightDot:
+	def __init__(self, H):
+		self.H = H
+		self.x = None
+
+	def forward(self, x):
+		self.x = x
+		out = np.dot(self.x, self.H)
+
+		return out
+
+	def backward(self, dout):
+		dx = np.dot(dout, self.H.T)
+		self.dH = np.dot(self.x.T, dout)
+
+		return dx
+
 class Relu:
 	def __init__(self):
 		self.mask = None
@@ -71,44 +130,72 @@ class Concatenation:
 		for sample, (u, i) in enumerate(self.Set):
 			self.dP[u] += dP_tmp[sample]
 			self.dQ[i] += dQ_tmp[sample]
-	
-class IdentityWithLoss:
-	def __init__(self):
-		self.loss = None
-		self.y = None	# Scalar
-		self.t = None	# Scalar
+class GMF:
+	def __init__(self, dataSet, nLatent):
+		#	##########################################################################################################
+		#	nUser		:	Number of users who have any nonzeros rating
+		#	nItem		:	Number of items which of rating is nonzero
+		#	nLatent		:	Number of latents
+		#	##########################################################################################################
+		
+		nUser, nItem = np.unique(dataSet[:, 0]).shape[0], np.unique(dataSet[:, 1]).shape[0]
 
-	def forward(self, x, t):
-		self.t = t.reshape(t.shape[0], -1)
-		self.y = x	# Identity function
-		self.loss = np.sum((self.y - self.t)**2) / t.shape[0]
+		#	##########################################################################################################
+		#	param_1		:	from input to concatenation. Just concatenation! There is no bias!
+		#	param_2		:	from concatenation to hidden. Affine and Relu.
+		#	param_3		:	from hidden to output. Weight dot product. It is same with Affine with zero bias
+		#	##########################################################################################################
 
-		return self.loss
+		
+		self.params = {}
+		self.params['P'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
+		self.params['Q'] = np.random.normal(loc=0, scale=0.01,  size=(nItem, nLatent))
+		self.params['H'] = np.random.normal(loc=0, scale=0.01,  size=(nLatent, 1))
 
-	def backward(self, dout=1.0):
-		dx = 2.0 * (self.y - self.t)
+		self.layers = {}
+		self.layers['ElementWiseProduct'] = ElementWiseProduct(self.params['P'], self.params['Q'])
+		self.layers['WeightDot'] = WeightDot(self.params['H'])
+		
+		self.lastLayer = IdentityWithLoss()
 
-		return dx
+	def predict(self, x):
+		for layer in self.layers.values():
+			x = layer.forward(x)
 
-class WeightDot:
-	def __init__(self, H):
-		self.H = H
-		self.x = None
+		return x
 
-	def forward(self, x):
-		self.x = x
-		out = np.dot(self.x, self.H)
+	def loss(self, x, t):
+		y = self.predict(x)
+		return self.lastLayer.forward(y, t)
 
-		return out
+	def gradient(self, x, t):
+		#	Forward
+		self.loss(x, t)
 
-	def backward(self, dout):
-		dx = np.dot(dout, self.H.T)
-		self.dH = np.dot(self.x.T, dout)
+		#	Backward
+		dout = 1.0
+		dout = self.lastLayer.backward(dout)
 
-		return dx
+		layers = list(self.layers.values())
+		layers.reverse()
+		for layer in layers:
+			dout = layer.backward(dout)
 
+		grads = {}
+		grads['P'] = self.layers['ElementWiseProduct'].dP
+		grads['Q'] = self.layers['ElementWiseProduct'].dQ
+		grads['H'] = self.layers['WeightDot'].dH
 
-class LayerNet:
+		return grads
+
+	def accuracy(self, x, t):
+		y = self.predict(x)
+		t = t.reshape(t.shape[0], -1)
+		
+		acc = np.sum(np.fabs(y - t) <= 0.05) / t.shape[0]
+		return acc
+
+class MLP:
 	def __init__(self, nSet, nLatent, hidSize):
 		#	##########################################################################################################
 		#	nSet		:	Number of pairs which of rating is nonzero
@@ -181,6 +268,8 @@ class LayerNet:
 		acc = np.sum(np.fabs(y - t) <= 0.05) / t.shape[0]
 		return acc
 
+
+
 def getTrainData(raw_data, ratio=4):
 	M, N = raw_data.shape
 
@@ -209,7 +298,6 @@ def getTrainData(raw_data, ratio=4):
 
 	return train_x, train_t
 
-
 def getData(raw_data):
 	M, N = raw_data.shape
 
@@ -227,16 +315,21 @@ def getData(raw_data):
 
 	return all_x, all_t, test_x, test_t
 
+
 if __name__ == "__main__":
 	raw_data = np.loadtxt("sample2.dat")
 
 	all_x, all_t, test_x, test_t = getData(raw_data)
 	
-	K = 20
 	nIter = 30000
-	lr = 0.001
+	lr = 0.002
 
-	network = LayerNet(all_x, K, 128)
+	#	###################################################################################
+	#	GMF Area
+	#	###################################################################################
+	K_GMF = 20
+	GMF = GMF(all_x, K_GMF)
+	print("Start GMF")
 
 	for i in range(nIter):
 		train_x, train_t = getTrainData(raw_data, 3)
@@ -247,23 +340,67 @@ if __name__ == "__main__":
 		batch_mask = np.random.choice(train_size, batch_size, replace=False)
 		batch_x = train_x[batch_mask]
 		batch_t = train_t[batch_mask]
-		grad = network.gradient(batch_x, batch_t)
+		grad = GMF.gradient(batch_x, batch_t)
 
-		for key in ('P', 'Q', 'W1', 'b1', 'H'):
-			network.params[key] -= lr * grad[key]
+		for key in ('P', 'Q', 'H'):
+			GMF.params[key] -= lr * grad[key]
 
 		if (i+1)%1000 == 0:
-			train_loss = network.loss(train_x, train_t)
-			train_acc = network.accuracy(train_x, train_t)
-			test_acc = network.accuracy(test_x, test_t)
+			train_loss = GMF.loss(train_x, train_t)
+			train_acc = GMF.accuracy(train_x, train_t)
+			test_acc = GMF.accuracy(test_x, test_t)
 			print(f"Epoch{(i+1)//1000}\t loss={train_loss:.4e}\t train_acc={train_acc:.2%}\t test_acc={test_acc:.2%}")
 
+	#	###################################################################################
+	#	GMF Area
+	#	###################################################################################
+	K_MLP = 15
+	MLP = MLP(all_x, K_MLP, 128)
+	print("Start MLP")
+	
+	for i in range(nIter):
+		train_x, train_t = getTrainData(raw_data, 3)
 
-	all_y = network.predict(all_x)
+		train_size = train_x.shape[0]
+		batch_size = 250
+		
+		batch_mask = np.random.choice(train_size, batch_size, replace=False)
+		batch_x = train_x[batch_mask]
+		batch_t = train_t[batch_mask]
+		grad = MLP.gradient(batch_x, batch_t)
+
+		for key in ('P', 'Q', 'H'):
+			MLP.params[key] -= lr * grad[key]
+
+		if (i+1)%1000 == 0:
+			train_loss = MLP.loss(train_x, train_t)
+			train_acc = MLP.accuracy(train_x, train_t)
+			test_acc = MLP.accuracy(test_x, test_t)
+			print(f"Epoch{(i+1)//1000}\t loss={train_loss:.4e}\t train_acc={train_acc:.2%}\t test_acc={test_acc:.2%}")
+
+	#	###################################################################################
+	#	NeuMF Area
+	#	###################################################################################
+
+	alphaList = np.linspace(0, 1, 101, endpoint=True)
+
+	test_t = test_t.reshape(test_t.shape[0], -1)
+	acc_list = []
+
+	for alpha in alphaList:
+		test_y = alpha * GMF.predict(test_x) + (1.0 - alpha) * MLP.predict(test_x)
+		acc = np.sum(np.fabs(test_y - test_t) <= 0.05) / test_t.shape[0]
+		acc_list.append(acc)
+	
+		print(f"ratio : {alpha:.2f}\t accuracy:{acc:.2%}")
+	
+	alphaIdx = np.argmax(acc_list)
+	alpha = alphaList[alphaIdx]
+
+	all_y = alpha * GMF.predict(all_x) + (1.0 - alpha) * MLP.predict(all_x)
 
 	all_y = all_y.reshape(raw_data.shape[0], raw_data.shape[1])
 	all_t = all_t.reshape(raw_data.shape[0], raw_data.shape[1])
 	
-	np.savetxt("LearnedMLP.dat", all_y)
-
+	np.savetxt("LearnedNeuMF.dat", all_y)
 

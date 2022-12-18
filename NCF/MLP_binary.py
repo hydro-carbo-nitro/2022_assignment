@@ -4,9 +4,6 @@ import numpy as np
 
 np.set_printoptions(precision=1, suppress=True)
 
-def MSE(y, t):
-	return (y - t)**2
-
 def sigmoid(x):
 	return 1.0 / (1.0 + np.exp(-x))
 
@@ -50,35 +47,34 @@ class Affine:
 		return dx
 
 class Concatenation:
-	def __init__(self, WUser, WItem):
-		self.WU = WUser
-		self.WI = WItem
+	def __init__(self, P, Q):
+		self.P = P
+		self.Q = Q
 
 	def forward(self, x):
 		self.Set = np.int32(x)
 		self.idxUser, self.idxItem = self.Set[:, 0], self.Set[:, 1]
 
-		user = self.WU[self.idxUser]
-		item = self.WI[self.idxItem]
+		user = self.P[self.idxUser]
+		item = self.Q[self.idxItem]
 
 		out = np.concatenate((user, item), axis=1)
-
 		return out
 
 	def backward(self, dout):
-		nLatent = self.WU.shape[1]
+		nLatent = self.P.shape[1]
 		
-		self.dWU = np.zeros_like(self.WU)
-		self.dWI = np.zeros_like(self.WI)
+		self.dP = np.zeros_like(self.P)
+		self.dQ = np.zeros_like(self.Q)
 
-		dWU_tmp = dout[:, :nLatent]
-		dWI_tmp = dout[:, nLatent:]
+		dP_tmp = dout[:, :nLatent]
+		dQ_tmp = dout[:, nLatent:]
 
 		# I hope to avoid for loop...
 		for sample, (u, i) in enumerate(self.Set):
-			self.dWU[u] += dWU_tmp[sample]
-			self.dWI[i] += dWI_tmp[sample]
-	
+			self.dP[u] += dP_tmp[sample]
+			self.dQ[i] += dQ_tmp[sample]
+
 class SigmoidWithLoss:
 	def __init__(self):
 		self.loss = None
@@ -98,19 +94,19 @@ class SigmoidWithLoss:
 		return dx
 
 class WeightDot:
-	def __init__(self, W):
-		self.W = W
+	def __init__(self, H):
+		self.H = H
 		self.x = None
 
 	def forward(self, x):
 		self.x = x
-		out = np.dot(self.x, self.W)
+		out = np.dot(self.x, self.H)
 
 		return out
 
 	def backward(self, dout):
-		dx = np.dot(dout, self.W.T)
-		self.dW = np.dot(self.x.T, dout)
+		dx = np.dot(dout, self.H.T)
+		self.dH = np.dot(self.x.T, dout)
 
 		return dx
 
@@ -135,18 +131,18 @@ class LayerNet:
 
 		
 		self.params = {}
-		self.params['WU'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
-		self.params['WI'] = np.random.normal(loc=0, scale=0.01,  size=(nItem, nLatent))
-		self.params['W2'] = np.random.normal(loc=0, scale=0.01,  size=(2*nLatent, hidSize))
-		self.params['b2'] = np.zeros(hidSize)
-		self.params['W3'] = np.random.normal(loc=0, scale=0.01,  size=(hidSize, 1))
+		self.params['P'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
+		self.params['Q'] = np.random.normal(loc=0, scale=0.01,  size=(nItem, nLatent))
+		self.params['W1'] = np.random.normal(loc=0, scale=0.01,  size=(2*nLatent, hidSize))
+		self.params['b1'] = np.zeros(hidSize)
+		self.params['H'] = np.random.normal(loc=0, scale=0.01,  size=(hidSize, 1))
 
 		self.layers = {}
-		self.layers['Concatenation'] = Concatenation(self.params['WU'], self.params['WI'])			# Not Yet
-		self.layers['Affine2'] = Affine(self.params['W2'], self.params['b2'])
+		self.layers['Concatenation'] = Concatenation(self.params['P'], self.params['Q'])
+		self.layers['Affine2'] = Affine(self.params['W1'], self.params['b1'])
 		self.layers['Relu2'] = Relu()
-		self.layers['WeightDot'] = WeightDot(self.params['W3'])
-
+		self.layers['WeightDot'] = WeightDot(self.params['H'])
+		
 		self.lastLayer = SigmoidWithLoss()
 
 	def predict(self, x):
@@ -173,37 +169,25 @@ class LayerNet:
 			dout = layer.backward(dout)
 
 		grads = {}
-		grads['WU'] = self.layers['Concatenation'].dWU
-		grads['WI'] = self.layers['Concatenation'].dWI
-		grads['W2'] = self.layers['Affine2'].dW
-		grads['b2'] = self.layers['Affine2'].db
-		grads['W3'] = self.layers['WeightDot'].dW
+		grads['P'] = self.layers['Concatenation'].dP
+		grads['Q'] = self.layers['Concatenation'].dQ
+		grads['W1'] = self.layers['Affine2'].dW
+		grads['b1'] = self.layers['Affine2'].db
+		grads['H'] = self.layers['WeightDot'].dH
 
 		return grads
 
 	def accuracy(self, x, t):
 		y = sigmoid(self.predict(x))
-		
-		acc = np.sum(np.fabs(y - t) <= 0.01) / t.shape[0]
+		t = t.reshape(t.shape[0], -1)
+
+		acc = np.sum(np.fabs(y - t) <= 0.1) / t.shape[0]
 		return acc
 
-def get_samples(raw_data, ratio=4):
+def getTrainData(raw_data, ratio=4):
 	M, N = raw_data.shape
 
 	data = raw_data.copy()
-	data[data != 0] = 1 # to be implicit
-
-	# for all instances
-	allSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N)])
-	
-	all_x = allSet[:, :2]
-	all_t = allSet[:, 2]
-
-	# for testSet
-	testSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] != 0])
-	
-	test_x = testSet[:, :2]
-	test_t = testSet[:, 2]
 	
 	# for trainSet. make some positives to be negative
 	for u in range(M):
@@ -213,7 +197,7 @@ def get_samples(raw_data, ratio=4):
 			data[u, blind] = 0
 		
 	# for positive instances
-	posSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] != 0])
+	posSet = np.array([(u, i, data[u, i]) for u in range(M) for i in range(N) if data[u, i] > 0])
 	
 	# for negative instances
 	for u in range(M):
@@ -223,46 +207,67 @@ def get_samples(raw_data, ratio=4):
 
 		trainSet = np.concatenate((posSet, negSet), axis=0)
 
-
 	train_x = trainSet[:, :2]
 	train_t = trainSet[:, 2]
 
-	return train_x, train_t, test_x, test_t, all_x, all_t
+	return train_x, train_t
+
+
+def getData(raw_data):
+	M, N = raw_data.shape
+
+	# for all instances
+	allSet = np.array([(u, i, raw_data[u, i]) for u in range(M) for i in range(N)])
+	
+	all_x = allSet[:, :2]
+	all_t = allSet[:, 2]
+
+	# for testSet. Only positive instances
+	testSet = np.array([(u, i, raw_data[u, i]) for u in range(M) for i in range(N) if raw_data[u, i] > 0])
+	
+	test_x = testSet[:, :2]
+	test_t = testSet[:, 2]
+
+	return all_x, all_t, test_x, test_t
 
 if __name__ == "__main__":
-	raw_data = np.loadtxt("sample.dat")
-
-	train_x, train_t, test_x, test_t, all_x, all_t = get_samples(raw_data, 2)
+	raw_data = np.loadtxt("sample2.dat")
+	raw_data[raw_data != 0] = 1 # to be implicit
 	
-	K = 4
-	nIter = 50000
-	lr = 0.003
-	train_size = train_x.shape[0]
-	batch_size = train_size // 2
+	all_x, all_t, test_x, test_t = getData(raw_data)
+	
+	K = 20
+	nIter = 30000
+	lr = 0.001
 
-	network = LayerNet(all_x, K, 64)
+	network = LayerNet(all_x, K, 128)
 
 	for i in range(nIter):
+		train_x, train_t = getTrainData(raw_data, 3)
+
+		train_size = train_x.shape[0]
+		batch_size = 250
+		
 		batch_mask = np.random.choice(train_size, batch_size, replace=False)
 		batch_x = train_x[batch_mask]
 		batch_t = train_t[batch_mask]
 		grad = network.gradient(batch_x, batch_t)
 
-		for key in ('WU', 'WI', 'W2', 'b2', 'W3'):
+		for key in ('P', 'Q', 'W1', 'b1', 'H'):
 			network.params[key] -= lr * grad[key]
 
 		if (i+1)%1000 == 0:
 			train_loss = network.loss(train_x, train_t)
 			train_acc = network.accuracy(train_x, train_t)
 			test_acc = network.accuracy(test_x, test_t)
-			print(f"{i+1} : loss={train_loss:4e}\t traing_acc={train_acc:4e}\t test_acc={test_acc:4e}")
+			print(f"Epoch{(i+1)//1000}\t loss={train_loss:.4e}\t train_acc={train_acc:.2%}\t test_acc={test_acc:.2%}")
 
 
 	all_y = sigmoid(network.predict(all_x))
 
 	all_y = all_y.reshape(raw_data.shape[0], raw_data.shape[1])
 	all_t = all_t.reshape(raw_data.shape[0], raw_data.shape[1])
-	print(all_y)
-	print(all_t)
+	
+	np.savetxt("LearnedMLPBinary.dat", all_y)
 
 
