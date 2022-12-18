@@ -6,47 +6,49 @@ np.set_printoptions(precision=1, suppress=True)
 
 class ElementWiseProduct:
 	def __init__(self, P, Q):
-		self.P = P
-		self.Q = Q
+		self.P = P # User Latent Matrix
+		self.Q = Q # Item Latent Matrix
 
 	def forward(self, x):
-		self.Set = np.int32(x)
-		self.idxUser, self.idxItem = self.Set[:, 0], self.Set[:, 1]
+		self.Set = np.int32(x) # convert float to int
+		self.idxUser, self.idxItem = self.Set[:, 0], self.Set[:, 1] # bring user and item index pair which of value is nonzero
 
-		user = self.P[self.idxUser]
-		item = self.Q[self.idxItem]
+		user = self.P[self.idxUser] # extract user latent vector
+		item = self.Q[self.idxItem] # extract item latent vector
 
-		out = user * item
+		out = user * item # element wise product.
 
-		return out
+		return out # out.shape = (the number of pairs(, the number of latent)
 
 	def backward(self, dout):
 		self.dP = np.zeros_like(self.P)
 		self.dQ = np.zeros_like(self.Q)
 
 		for sample, (u, i) in enumerate(self.Set):
-			self.dP[u] += dout[sample] * self.Q[i]
-			self.dQ[i] += dout[sample] * self.P[u]
+			# gradient desent for each latent vectors
+			self.dP[u] += dout[sample] * self.Q[i] # "u" user change
+			self.dQ[i] += dout[sample] * self.P[u] # "i" user change
 		
 class IdentityWithLoss:
 	def __init__(self):
 		self.loss = None
-		self.y = None	# Scalar
-		self.t = None	# Scalar
+		self.y = None	# y.shape = (the number of ratings, 1)
+		self.t = None	# t.shape = (the number of ratings, )
 
 	def forward(self, x, t):
-		self.t = t.reshape(t.shape[0], -1)
+		self.t = t.reshape(t.shape[0], -1) # reshape from (the number of ratings, ) to (the number of ratings, 1)
 		self.y = x	# Identity function
-		self.loss = np.sum((self.y - self.t) ** 2) / t.shape[0]
+		self.loss = np.sum((self.y - self.t) ** 2) / t.shape[0] # mean square error
 
 		return self.loss
 
 	def backward(self, dout=1.0):
-		dx = 2.0 * (self.y - self.t)
+		dx = 2.0 * (self.y - self.t) # differentiate mean square error
 
 		return dx
 
 class WeightDot:
+	# it is similar with Affine but there is no bias
 	def __init__(self, H):
 		self.H = H
 		self.x = None
@@ -103,6 +105,7 @@ class Affine:
 		return dx
 
 class Concatenation:
+	# it is similar with ElementWiseProduct but we concatenate user vector and item vector not elementwise product
 	def __init__(self, P, Q):
 		self.P = P
 		self.Q = Q
@@ -115,7 +118,7 @@ class Concatenation:
 		item = self.Q[self.idxItem]
 
 		out = np.concatenate((user, item), axis=1)
-		return out
+		return out # out.shape = (the number of pairs, 2 * the number of latents)
 
 	def backward(self, dout):
 		nLatent = self.P.shape[1]
@@ -123,39 +126,29 @@ class Concatenation:
 		self.dP = np.zeros_like(self.P)
 		self.dQ = np.zeros_like(self.Q)
 
-		dP_tmp = dout[:, :nLatent]
-		dQ_tmp = dout[:, nLatent:]
+		dP_tmp = dout[:, :nLatent] # 0 ~ nLatent is elements of user latent matrix
+		dQ_tmp = dout[:, nLatent:] # nLatent ~ -1 is elements of item latent matrix
 
-		# I hope to avoid for loop...
 		for sample, (u, i) in enumerate(self.Set):
 			self.dP[u] += dP_tmp[sample]
 			self.dQ[i] += dQ_tmp[sample]
 class GMF:
 	def __init__(self, dataSet, nLatent):
-		#	##########################################################################################################
-		#	nUser		:	Number of users who have any nonzeros rating
-		#	nItem		:	Number of items which of rating is nonzero
-		#	nLatent		:	Number of latents
-		#	##########################################################################################################
-		
+		# The entire number of users and items
 		nUser, nItem = np.unique(dataSet[:, 0]).shape[0], np.unique(dataSet[:, 1]).shape[0]
-
-		#	##########################################################################################################
-		#	param_1		:	from input to concatenation. Just concatenation! There is no bias!
-		#	param_2		:	from concatenation to hidden. Affine and Relu.
-		#	param_3		:	from hidden to output. Weight dot product. It is same with Affine with zero bias
-		#	##########################################################################################################
-
 		
+		# Parameters which will be learned
 		self.params = {}
 		self.params['P'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
 		self.params['Q'] = np.random.normal(loc=0, scale=0.01,  size=(nItem, nLatent))
 		self.params['H'] = np.random.normal(loc=0, scale=0.01,  size=(nLatent, 1))
 
+		# Layers which the data go through
 		self.layers = {}
 		self.layers['ElementWiseProduct'] = ElementWiseProduct(self.params['P'], self.params['Q'])
 		self.layers['WeightDot'] = WeightDot(self.params['H'])
 		
+		# Lastlayer is Identitiy function
 		self.lastLayer = IdentityWithLoss()
 
 	def predict(self, x):
@@ -197,22 +190,7 @@ class GMF:
 
 class MLP:
 	def __init__(self, nSet, nLatent, hidSize):
-		#	##########################################################################################################
-		#	nSet		:	Number of pairs which of rating is nonzero
-		#	nUser		:	Number of users who have any nonzeros rating
-		#	nItem		:	Number of items which of rating is nonzero
-		#	nLatent		:	Number of latents
-		#	hidSize		:	HiddenLayer size. For the simple implementation, there is only one hidden layer
-		#	##########################################################################################################
-		
 		nUser, nItem = np.unique(nSet[:, 0]).shape[0], np.unique(nSet[:, 1]).shape[0]
-
-		#	##########################################################################################################
-		#	param_1		:	from input to concatenation. Just concatenation! There is no bias!
-		#	param_2		:	from concatenation to hidden. Affine and Relu.
-		#	param_3		:	from hidden to output. Weight dot product. It is same with Affine with zero bias
-		#	##########################################################################################################
-
 		
 		self.params = {}
 		self.params['P'] = np.random.normal(loc=0, scale=0.01,  size=(nUser, nLatent))
@@ -355,7 +333,8 @@ if __name__ == "__main__":
 	#	GMF Area
 	#	###################################################################################
 	K_MLP = 15
-	MLP = MLP(all_x, K_MLP, 128)
+	nIter = 40000
+	MLP = MLP(all_x, K_MLP, 64)
 	print("Start MLP")
 	
 	for i in range(nIter):
@@ -392,8 +371,9 @@ if __name__ == "__main__":
 		acc = np.sum(np.fabs(test_y - test_t) <= 0.05) / test_t.shape[0]
 		acc_list.append(acc)
 	
-		print(f"ratio : {alpha:.2f}\t accuracy:{acc:.2%}")
+		print(f"ratio : {alpha:.2f}\t accuracy:{acc:.6%}")
 	
+	# choose the most precise alpha
 	alphaIdx = np.argmax(acc_list)
 	alpha = alphaList[alphaIdx]
 

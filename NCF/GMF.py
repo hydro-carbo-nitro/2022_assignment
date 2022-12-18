@@ -180,14 +180,14 @@ if __name__ == "__main__":
 
 	all_x, all_t, test_x, test_t = getData(raw_data)
 	
-	K = 20
+	K = 16
 	nIter = 30000
 	lr = 0.001
 
 	network = LayerNet(all_x, K)
 
 	for i in range(nIter):
-		train_x, train_t = getTrainData(raw_data, 3)
+		train_x, train_t = getTrainData(raw_data, 4)
 
 		train_size = train_x.shape[0]
 		batch_size = 250
